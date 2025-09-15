@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>New Project</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-color: #f0f0f0;
+    }
+    #top-section {
+      flex: 3;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: #ffffff;
+      border-bottom: 1px solid #ccc;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #window-dev-option {
+      cursor: pointer;
+      font-size: 24px;
+      color: #333;
+      text-decoration: underline;
+      padding: 10px;
+    }
+    #window-dev-option:hover {
+      color: #007bff;
+    }
+    #platform-section {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    #platform-section label {
+      font-size: 16px;
+    }
+    #bottom-section {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #e0e0e0;
+      padding: 10px;
+      box-sizing: border-box;
+      gap: 10px;
+    }
+    .button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #next-button, #confirm-button, #back-button {
+      background-color: #007bff;
+      color: white;
+    }
+    #confirm-button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
+    #cancel-button {
+      background-color: #dc3545;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div id="top-section">
+    <div id="window-dev-option" onclick="markWindowDevClicked()">視窗開發</div>
+    <div id="platform-section">
+      <h2>支援的平台</h2>
+      <label><input type="checkbox" id="windows-checkbox" onchange="checkPlatformSelection()"> Windows</label>
+      <label><input type="checkbox" id="macos-checkbox" onchange="checkPlatformSelection()"> Mac OS</label>
+      <label><input type="checkbox" id="linux-checkbox" onchange="checkPlatformSelection()"> Linux</label>
+    </div>
+  </div>
+  <div id="bottom-section">
+    <button id="next-button" class="button" onclick="showPlatforms()">下一步</button>
+    <button id="cancel-button" class="button" onclick="window.close()">取消</button>
+    <button id="confirm-button" class="button" style="display: none;" onclick="confirmProject()" disabled>確定</button>
+    <button id="back-button" class="button" style="display: none;" onclick="goBack()">上一步</button>
+  </div>
+
+  <script>
+    let isWindowDevClicked = false;
+
+    function markWindowDevClicked() {
+      isWindowDevClicked = true;
+      console.log('Window Development clicked');
+    }
+
+    function showPlatforms() {
+      console.log('Next button clicked, isWindowDevClicked:', isWindowDevClicked); // 調試日誌
+      if (!isWindowDevClicked) {
+        console.log('Cannot proceed: Window Development not clicked');
+        return;
+      }
+      document.getElementById('window-dev-option').style.display = 'none';
+      document.getElementById('platform-section').style.display = 'flex';
+      document.getElementById('next-button').style.display = 'none';
+      document.getElementById('confirm-button').style.display = 'inline-block';
+      document.getElementById('back-button').style.display = 'inline-block';
+      checkPlatformSelection();
+      console.log('Platform section shown');
+    }
+
+    function goBack() {
+      console.log('Back button clicked'); // 調試日誌
+      document.getElementById('window-dev-option').style.display = 'block';
+      document.getElementById('platform-section').style.display = 'none';
+      document.getElementById('next-button').style.display = 'inline-block';
+      document.getElementById('confirm-button').style.display = 'none';
+      document.getElementById('back-button').style.display = 'none';
+      isWindowDevClicked = false;
+      console.log('Returned to initial state');
+    }
+
+    function checkPlatformSelection() {
+      const windows = document.getElementById('windows-checkbox').checked;
+      const macos = document.getElementById('macos-checkbox').checked;
+      const linux = document.getElementById('linux-checkbox').checked;
+      const confirmButton = document.getElementById('confirm-button');
+      confirmButton.disabled = !(windows || macos || linux);
+      console.log('Platform selection:', { windows, macos, linux, confirmButtonDisabled: confirmButton.disabled }); // 調試日誌
+    }
+
+    function confirmProject() {
+      console.log('Confirm button clicked'); // 調試日誌
+      window.api.send('project-created');
+      window.close();
+    }
+  </script>
+</body>
+</html>

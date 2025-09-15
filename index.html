@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Electron Visualization App</title>
+  <style>
+    body { 
+      margin: 0; 
+      font-family: Arial, sans-serif; 
+      height: 100vh; 
+      display: flex;
+      background-color: #f0f0f0;
+    }
+    #left-sidebar {
+      width: 200px;
+      background-color: #e0e0e0;
+      padding: 20px;
+      box-sizing: border-box;
+      border-right: 1px solid #ccc;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 10;
+    }
+    #main-content {
+      flex: 1;
+      padding: 0;
+      text-align: center;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: visible;
+      z-index: 5;
+    }
+    #right-sidebar {
+      width: 200px;
+      background-color: #e0e0e0;
+      padding: 20px;
+      box-sizing: border-box;
+      border-left: 1px solid #ccc;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      min-height: 100%;
+      justify-content: flex-start;
+    }
+    #imported-files {
+      flex: 0 0 auto;
+    }
+    #properties {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+    #window-canvas {
+      border: none;
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+      pointer-events: auto;
+    }
+    .sidebar-button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      background-color: #007bff;
+      color: white;
+      text-align: center;
+    }
+    .sidebar-button:hover {
+      background-color: #0056b3;
+    }
+    #properties-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    #properties-table th, #properties-table td {
+      border: 1px solid #ccc;
+      padding: 5px;
+      text-align: left;
+    }
+    #properties-table th {
+      background-color: #007bff;
+      color: white;
+    }
+    #properties-table input, #properties-table select {
+      width: 100%;
+      padding: 2px;
+      border: none;
+      outline: none;
+    }
+    #properties-table button {
+      padding: 2px 8px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #properties-table button:hover {
+      background-color: #0056b3;
+    }
+    #context-menu {
+      position: absolute;
+      background-color: #fff;
+      border: 1px solid #ccc;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+      z-index: 1000;
+      padding: 5px 0;
+    }
+    #context-menu div {
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    #context-menu div:hover {
+      background-color: #e0e0e0;
+    }
+  </style>
+</head>
+<body>
+  <div id="left-sidebar">
+    <h2>Left Sidebar</h2>
+    <p>Tools or controls can go here.</p>
+  </div>
+  <div id="main-content">
+    <h1>Main Content</h1>
+    <p>This is the main visualization area.</p>
+  </div>
+  <div id="right-sidebar">
+    <h2>Right Sidebar</h2>
+    <p>Properties or settings can go here.</p>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    let isTextMode = false;
+    let isDraggingText = false;
+    let isDraggingMain = false;
+    let isDraggingTextBox = false;
+    let width, height, startX, startY, textX, textY, textWidth, textHeight;
+    let draggingTextBoxIndex = -1;
+    let selectedTextBoxIndex = -1;
+    let selectedMainWindow = false;
+    let canvas, ctx;
+    let textBoxes = [];
+    let textBoxCounter = 0;
+
+    function enableTextMode() {
+      isTextMode = true;
+      console.log('Text mode enabled, isTextMode:', isTextMode);
+    }
+
+    function drawWindow() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 繪製主要線條框
+      ctx.strokeStyle = selectedMainWindow ? '#ff0000' : '#000';
+      ctx.lineWidth = selectedMainWindow ? 6 : 5;
+      ctx.beginPath();
+      ctx.roundRect(50, 50, width, height, 10);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(0, 0, 255, 0.3)';
+      ctx.fillRect(50 + width - 15, 50 + height - 15, 30, 30);
+      // 繪製所有文字框
+      textBoxes.forEach((box, index) => {
+        ctx.fillStyle = box.backgroundColor || '#ffffff';
+        ctx.fillRect(box.x, box.y, box.width, box.height);
+        ctx.strokeStyle = selectedTextBoxIndex === index ? '#ff0000' : '#000';
+        ctx.lineWidth = selectedTextBoxIndex === index ? 3 : 2;
+        ctx.beginPath();
+        ctx.rect(box.x, box.y, box.width, box.height);
+        ctx.stroke();
+        if (box.text) {
+          ctx.font = `${box.fontSize || 14}px Arial`;
+          ctx.fillStyle = box.fontColor || '#000';
+          ctx.textBaseline = 'top';
+          const textWidth = ctx.measureText(box.text).width;
+          let textX;
+          if (box.align === 'center') {
+            textX = box.x + (box.width - textWidth) / 2;
+          } else if (box.align === 'right') {
+            textX = box.x + box.width - textWidth - 5;
+          } else {
+            textX = box.x + 5; // left (default)
+          }
+          ctx.fillText(box.text, textX, box.y + 5);
+        }
+        console.log(`Text box ${index} drawn:`, { id: box.id, x: box.x, y: box.y, width: box.width, height: box.height, text: box.text, align: box.align, fontSize: box.fontSize, fontColor: box.fontColor, backgroundColor: box.backgroundColor, selected: selectedTextBoxIndex === index });
+      });
+      // 繪製當前拖曳中的文字框
+      if (isDraggingText && textWidth && textHeight) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(textX, textY, textWidth, textHeight);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.rect(textX, textY, textWidth, textHeight);
+        ctx.stroke();
+        console.log('Current text box drawn:', { textX, textY, textWidth, textHeight });
+      }
+      console.log('Window drawn, main size:', { width, height }, 'textBoxes:', textBoxes, 'selectedTextBoxIndex:', selectedTextBoxIndex, 'selectedMainWindow:', selectedMainWindow);
+    }
+
+    function updatePropertiesTable() {
+      const rightSidebar = document.getElementById('right-sidebar');
+      if (selectedTextBoxIndex !== -1) {
+        const box = textBoxes[selectedTextBoxIndex];
+        rightSidebar.innerHTML = `
+          <div id="imported-files">
+            <h2>Imported Files</h2>
+            <p>Files will be displayed here (TBD).</p>
+          </div>
+          <div id="properties">
+            <h2>Properties</h2>
+            <table id="properties-table">
+              <tr><th colspan="3">${box.id}</th></tr>
+              <tr><td>text</td><td colspan="2"><input id="text-input" value="${box.text || ''}"></td></tr>
+              <tr><td>位置</td><td colspan="2"><select id="align-select">
+                <option value="left" ${box.align === 'left' ? 'selected' : ''}>left</option>
+                <option value="center" ${box.align === 'center' ? 'selected' : ''}>center</option>
+                <option value="right" ${box.align === 'right' ? 'selected' : ''}>right</option>
+              </select></td></tr>
+              <tr><td>font size</td><td colspan="2"><input id="font-size-input" type="number" value="${box.fontSize || 14}"></td></tr>
+              <tr><td>font color</td><td>${box.fontColor || 'black'}</td><td><button id="font-color-button">選擇顏色</button></td></tr>
+              <tr><td>背景顏色</td><td>${box.backgroundColor || 'white'}</td><td><button id="background-color-button">選擇顏色</button></td></tr>
+            </table>
+          </div>
+        `;
+        document.getElementById('text-input').addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            box.text = e.target.value;
+            console.log('Text updated for box:', { id: box.id, text: box.text });
+            drawWindow();
+          }
+        });
+        document.getElementById('align-select').addEventListener('change', (e) => {
+          box.align = e.target.value;
+          console.log('Align updated for box:', { id: box.id, align: box.align });
+          drawWindow();
+        });
+        document.getElementById('font-size-input').addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            const fontSize = parseInt(e.target.value);
+            if (fontSize > 0) {
+              box.fontSize = fontSize;
+              console.log('Font size updated for box:', { id: box.id, fontSize: box.fontSize });
+              drawWindow();
+            }
+          }
+        });
+        document.getElementById('font-color-button').addEventListener('click', () => {
+          ipcRenderer.send('open-color-picker', box.fontColor || '#000000');
+          console.log('Sent open-color-picker IPC, current font color:', box.fontColor || '#000000');
+        });
+        document.getElementById('background-color-button').addEventListener('click', () => {
+          ipcRenderer.send('open-background-color-picker', box.backgroundColor || '#ffffff');
+          console.log('Sent open-background-color-picker IPC, current background color:', box.backgroundColor || '#ffffff');
+        });
+      } else if (selectedMainWindow) {
+        rightSidebar.innerHTML = `
+          <div id="imported-files">
+            <h2>Imported Files</h2>
+            <p>Files will be displayed here (TBD).</p>
+          </div>
+          <div id="properties">
+            <h2>Properties</h2>
+            <table id="properties-table">
+              <tr><th colspan="3">mainWindow</th></tr>
+              <tr><td>text</td><td colspan="2"><input id="text-input" value=""></td></tr>
+            </table>
+          </div>
+        `;
+      } else {
+        rightSidebar.innerHTML = `
+          <h2>Right Sidebar</h2>
+          <p>Properties or settings can go here.</p>
+        `;
+      }
+      console.log('Properties table updated, selectedTextBoxIndex:', selectedTextBoxIndex, 'selectedMainWindow:', selectedMainWindow);
+    }
+
+    ipcRenderer.on('color-selected', (event, color) => {
+      if (selectedTextBoxIndex !== -1) {
+        textBoxes[selectedTextBoxIndex].fontColor = color;
+        console.log('Font color updated for box:', { id: textBoxes[selectedTextBoxIndex].id, fontColor: color });
+        drawWindow();
+        updatePropertiesTable();
+      }
+    });
+
+    ipcRenderer.on('background-color-selected', (event, color) => {
+      if (selectedTextBoxIndex !== -1) {
+        textBoxes[selectedTextBoxIndex].backgroundColor = color;
+        console.log('Background color updated for box:', { id: textBoxes[selectedTextBoxIndex].id, backgroundColor: color });
+        drawWindow();
+        updatePropertiesTable();
+      }
+    });
+
+    ipcRenderer.on('get-window-data', () => {
+      const windowData = { width, height, textBoxes };
+      ipcRenderer.send('window-data', windowData);
+      console.log('Sent window data:', windowData);
+    });
+
+    ipcRenderer.on('update-main-content', (event, data) => {
+      // 更新左側欄
+      const leftSidebar = document.getElementById('left-sidebar');
+      leftSidebar.innerHTML = `
+        <button class="sidebar-button" onclick="enableTextMode()">文字</button>
+        <button class="sidebar-button" onclick="console.log('Button clicked')">按鈕</button>
+      `;
+      // 更新中間區域
+      const mainContent = document.getElementById('main-content');
+      mainContent.innerHTML = `
+        <canvas id="window-canvas"></canvas>
+      `;
+      canvas = document.getElementById('window-canvas');
+      canvas.width = mainContent.clientWidth;
+      canvas.height = mainContent.clientHeight;
+      ctx = canvas.getContext('2d');
+      width = canvas.width * 0.8;
+      height = canvas.height * 0.8;
+      textBoxes = [];
+      textBoxCounter = 0;
+
+      drawWindow();
+      updatePropertiesTable();
+
+      canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        console.log('Mouse down at:', { x, y, button: e.button, isTextMode, selectedTextBoxIndex, selectedMainWindow });
+        // 移除現有右鍵選單
+        const existingMenu = document.getElementById('context-menu');
+        if (existingMenu) existingMenu.remove();
+        // 檢查是否點擊在現有文字框內
+        if (e.button === 0) {
+          selectedTextBoxIndex = -1;
+          selectedMainWindow = false;
+          for (let i = textBoxes.length - 1; i >= 0; i--) {
+            const box = textBoxes[i];
+            if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
+              isDraggingTextBox = true;
+              draggingTextBoxIndex = i;
+              selectedTextBoxIndex = i;
+              startX = x;
+              startY = y;
+              console.log('Start dragging text box:', { index: i, id: box.id, x: box.x, y: box.y });
+              drawWindow();
+              updatePropertiesTable();
+              return;
+            }
+          }
+          // 檢查是否點擊主要線條框
+          if (!isTextMode && x >= 50 && x <= 50 + width && y >= 50 && y <= 50 + height) {
+            selectedMainWindow = true;
+            console.log('Selected main window');
+            drawWindow();
+            updatePropertiesTable();
+            return;
+          }
+        }
+        // 創建新文字框
+        if (isTextMode && e.button === 0) {
+          if (x >= 50 && x <= 50 + width && y >= 50 && y <= 50 + height) {
+            isDraggingText = true;
+            textX = x;
+            textY = y;
+            textWidth = 0;
+            textHeight = 0;
+            console.log('Start drawing text box at:', { x, y });
+            drawWindow();
+          } else {
+            console.log('Text box drag attempt outside main window:', { x, y });
+          }
+        } else if (x >= 50 + width - 15 && x <= 50 + width + 15 && y >= 50 + height - 15 && y <= 50 + height + 15) {
+          isDraggingMain = true;
+          startX = x;
+          startY = y;
+          console.log('Start dragging main window at:', { x, y });
+        }
+      });
+
+      canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        console.log('Mouse move at:', { x, y, isDraggingText, isDraggingTextBox, isTextMode });
+        if (isDraggingMain) {
+          width = Math.max(100, Math.min(canvas.width - 60, width + (x - startX)));
+          height = Math.max(100, Math.min(canvas.height - 60, height + (y - startY)));
+          startX = x;
+          startY = y;
+          drawWindow();
+          console.log('Dragging main window, new size:', { width, height });
+        } else if (isDraggingText && isTextMode) {
+          const newWidth = x - textX;
+          const newHeight = y - textY;
+          textWidth = Math.max(10, Math.min(newWidth, width - (textX - 50) - 10));
+          textHeight = Math.max(10, Math.min(newHeight, height - (textY - 50) - 10));
+          drawWindow();
+          console.log('Dragging text box (new), new size:', { textX, textY, textWidth, textHeight });
+        } else if (isDraggingTextBox) {
+          const box = textBoxes[draggingTextBoxIndex];
+          const dx = x - startX;
+          const dy = y - startY;
+          box.x = Math.max(50, Math.min(50 + width - box.width, box.x + dx));
+          box.y = Math.max(50, Math.min(50 + height - box.height, box.y + dy));
+          startX = x;
+          startY = y;
+          drawWindow();
+          console.log('Dragging text box:', { index: draggingTextBoxIndex, id: box.id, x: box.x, y: box.y });
+        }
+      });
+
+      canvas.addEventListener('mouseup', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        console.log('Mouse up at:', { x, y, button: e.button, isDraggingText, isDraggingTextBox, isTextMode });
+        if (isDraggingMain && e.button === 0) {
+          isDraggingMain = false;
+          console.log('Stop dragging main window, final size:', { width, height });
+          drawWindow();
+        } else if (isDraggingText && isTextMode && e.button === 0) {
+          isDraggingText = false;
+          if (textWidth && textHeight) {
+            textBoxCounter++;
+            textBoxes.push({ id: `text${textBoxCounter}`, x: textX, y: textY, width: textWidth, height: textHeight, text: '', align: 'left', fontSize: 14, fontColor: 'black', backgroundColor: 'white' });
+            selectedTextBoxIndex = textBoxes.length - 1;
+            console.log('Text box saved:', { id: `text${textBoxCounter}`, x: textX, y: textY, width: textWidth, height: textHeight, text: '', align: 'left', fontSize: 14, fontColor: 'black', backgroundColor: 'white' }, 'textBoxes:', textBoxes);
+            drawWindow();
+            updatePropertiesTable();
+          }
+          console.log('Stop drawing text box via left-click release, final size:', { textX, textY, textWidth, textHeight });
+        } else if (isDraggingTextBox && e.button === 0) {
+          isDraggingTextBox = false;
+          console.log('Stop dragging text box, final position:', { index: draggingTextBoxIndex, id: textBoxes[draggingTextBoxIndex].id, x: textBoxes[draggingTextBoxIndex].x, y: textBoxes[draggingTextBoxIndex].y });
+          drawWindow();
+        }
+      });
+
+      canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        console.log('Right-click at:', { x, y, isDraggingText, isTextMode, selectedTextBoxIndex, selectedMainWindow });
+        // 移除現有右鍵選單
+        const existingMenu = document.getElementById('context-menu');
+        if (existingMenu) existingMenu.remove();
+        // 創建模式：僅儲存文字框
+        if (isDraggingText && isTextMode) {
+          isDraggingText = false;
+          if (textWidth && textHeight) {
+            textBoxCounter++;
+            textBoxes.push({ id: `text${textBoxCounter}`, x: textX, y: textY, width: textWidth, height: textHeight, text: '', align: 'left', fontSize: 14, fontColor: 'black', backgroundColor: 'white' });
+            selectedTextBoxIndex = textBoxes.length - 1;
+            console.log('Text box saved via right-click:', { id: `text${textBoxCounter}`, x: textX, y: textY, width: textWidth, height: textHeight, text: '', align: 'left', fontSize: 14, fontColor: 'black', backgroundColor: 'white' }, 'textBoxes:', textBoxes);
+            drawWindow();
+            updatePropertiesTable();
+          }
+          console.log('Stop drawing text box via right-click, final size:', { textX, textY, textWidth, textHeight });
+        }
+        // 非創建模式：選中主要線條框或文字框時顯示右鍵選單
+        if (!isTextMode && x >= 50 && x <= 50 + width && y >= 50 && y <= 50 + height && (selectedMainWindow || selectedTextBoxIndex !== -1)) {
+          const menu = document.createElement('div');
+          menu.id = 'context-menu';
+          menu.style.left = `${e.clientX}px`;
+          menu.style.top = `${e.clientY}px`;
+          menu.innerHTML = `<div onclick="document.getElementById('context-menu').remove(); ipcRenderer.send('open-code-window'); console.log('Context menu item clicked: 程式碼')">程式碼</div>`;
+          document.body.appendChild(menu);
+          console.log('Context menu shown at:', { x: e.clientX, y: e.clientY });
+        } else {
+          console.log('Context menu not shown, conditions not met:', { isTextMode, x, y, selectedMainWindow, selectedTextBoxIndex });
+        }
+      });
+
+      // 點擊其他地方移除右鍵選單
+      document.addEventListener('click', (e) => {
+        const existingMenu = document.getElementById('context-menu');
+        if (existingMenu && !existingMenu.contains(e.target)) {
+          existingMenu.remove();
+          console.log('Context menu removed');
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isTextMode) {
+          isTextMode = false;
+          isDraggingText = false;
+          console.log('Text mode disabled via Escape, isTextMode:', isTextMode);
+          drawWindow();
+          updatePropertiesTable();
+        } else if (e.metaKey && e.altKey && e.key === 'Backspace') {
+          if (selectedTextBoxIndex !== -1) {
+            textBoxes.splice(selectedTextBoxIndex, 1);
+            selectedTextBoxIndex = -1;
+            console.log('Deleted selected text box, textBoxes:', textBoxes);
+            drawWindow();
+            updatePropertiesTable();
+          } else {
+            console.log('No text box selected for deletion');
+          }
+        }
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        console.log('Mouse left canvas, isDraggingMain:', isDraggingMain, 'isDraggingText:', isDraggingText, 'isDraggingTextBox:', isDraggingTextBox);
+        if (isDraggingMain) {
+          isDraggingMain = false;
+          console.log('Dragging main window stopped (mouseleave)');
+          drawWindow();
+        }
+        if (isDraggingText) {
+          isDraggingText = false;
+          if (textWidth && textHeight) {
+            textBoxCounter++;
+            textBoxes.push({ id: `text${textBoxCounter}`, x: textX, y: textY, width: textWidth, height: textHeight, text: '', align: 'left', fontSize: 14, fontColor: 'black', backgroundColor: 'white' });
+            selectedTextBoxIndex = textBoxes.length - 1;
+            console.log('Text box saved on mouseleave:', { id: `text${textBoxCounter}`, x: textX, y: textY, width: textWidth, height: textHeight, text: '', align: 'left', fontSize: 14, fontColor: 'black', backgroundColor: 'white' }, 'textBoxes:', textBoxes);
+            drawWindow();
+            updatePropertiesTable();
+          }
+          console.log('Drawing text box stopped (mouseleave)');
+        }
+        if (isDraggingTextBox) {
+          isDraggingTextBox = false;
+          console.log('Dragging text box stopped (mouseleave):', { index: draggingTextBoxIndex, id: textBoxes[draggingTextBoxIndex].id });
+          drawWindow();
+        }
+      });
+
+      window.addEventListener('resize', () => {
+        canvas.width = mainContent.clientWidth;
+        canvas.height = mainContent.clientHeight;
+        width = canvas.width * 0.8;
+        height = canvas.height * 0.8;
+        drawWindow();
+        console.log('Canvas resized:', { width: canvas.width, height: canvas.height });
+      });
+
+      console.log('Main content updated: Sidebar buttons and window drawn');
+    });
+  </script>
+</body>
+</html>

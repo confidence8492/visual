@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>程式碼視窗</title>
+  <style>
+    body {
+      margin: 20px;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 40px);
+    }
+    #code-area {
+      flex: 3;
+      width: 100%;
+      padding: 10px;
+      box-sizing: border-box;
+      resize: none;
+    }
+    #bottom-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #debug-area {
+      flex: 1;
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      overflow-y: auto;
+    }
+    #button-area {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    button {
+      padding: 8px 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #close-button {
+      background-color: #ff3b30;
+    }
+    #close-button:hover {
+      background-color: #cc2e26;
+    }
+    /* 自訂關閉按鈕（僅 macOS 有效，Windows/Linux 可能顯示預設樣式） */
+    .traffic-lights .close {
+      background-color: #ff3b30;
+      border-radius: 50%;
+      width: 12px;
+      height: 12px;
+      margin: 4px;
+    }
+  </style>
+</head>
+<body>
+  <textarea id="code-area" placeholder="程式碼將在此編輯 (TBD)"></textarea>
+  <div id="bottom-section">
+    <div id="debug-area">Debug output will appear here</div>
+    <div id="button-area">
+      <button id="run-button">執行</button>
+      <button id="close-button">關閉</button>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    document.getElementById('run-button').addEventListener('click', () => {
+      ipcRenderer.send('run-code');
+      console.log('Run button clicked, sent run-code IPC');
+    });
+
+    document.getElementById('close-button').addEventListener('click', () => {
+      ipcRenderer.send('close-code-window');
+      console.log('Close button clicked, sent close-code-window IPC');
+    });
+
+    console.log('Code window loaded');
+  </script>
+</body>
+</html>

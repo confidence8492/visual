@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Output Window</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+    }
+    #output-canvas {
+      border: none;
+      display: block;
+      pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="output-canvas"></canvas>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    let canvas, ctx, width, height, textBoxes = [];
+    let isDraggingMain = false;
+    let startX, startY;
+
+    ipcRenderer.on('set-window-data', (event, data) => {
+      width = data.width;
+      height = data.height;
+      textBoxes = data.textBoxes;
+      canvas = document.getElementById('output-canvas');
+      canvas.width = width;
+      canvas.height = height;
+      ctx = canvas.getContext('2d');
+      drawWindow();
+      console.log('Output window initialized:', { width, height, textBoxes });
+    });
+
+    function drawWindow() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 不繪製主要線條框
+      // 繪製文字框
+      textBoxes.forEach((box) => {
+        ctx.fillStyle = box.backgroundColor || '#ffffff';
+        ctx.fillRect(box.x - 50, box.y - 50, box.width, box.height);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.rect(box.x - 50, box.y - 50, box.width, box.height);
+        ctx.stroke();
+        if (box.text) {
+          ctx.font = `${box.fontSize || 14}px Arial`;
+          ctx.fillStyle = box.fontColor || '#000';
+          ctx.textBaseline = 'top';
+          const textWidth = ctx.measureText(box.text).width;
+          let textX;
+          if (box.align === 'center') {
+            textX = (box.x - 50) + (box.width - textWidth) / 2;
+          } else if (box.align === 'right') {
+            textX = (box.x - 50) + box.width - textWidth - 5;
+          } else {
+            textX = (box.x - 50) + 5; // left (default)
+          }
+          ctx.fillText(box.text, textX, box.y - 50 + 5);
+        }
+        console.log(`Text box drawn in output window:`, { id: box.id, x: box.x - 50, y: box.y - 50, width: box.width, height: box.height, text: box.text, align: box.align, fontSize: box.fontSize, fontColor: box.fontColor, backgroundColor: box.backgroundColor });
+      });
+      // 繪製拖曳區
+      ctx.fillStyle = 'rgba(0, 0, 255, 0.3)';
+      ctx.fillRect(width - 15, height - 15, 30, 30);
+      console.log('Output window drawn, size:', { width, height });
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      console.log('Mouse down in output window:', { x, y });
+      if (x >= width - 15 && x <= width + 15 && y >= height - 15 && y <= height + 15) {
+        isDraggingMain = true;
+        startX = x;
+        startY = y;
+        console.log('Start dragging output window at:', { x, y });
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (isDraggingMain) {
+        width = Math.max(100, width + (x - startX));
+        height = Math.max(100, height + (y - startY));
+        startX = x;
+        startY = y;
+        canvas.width = width;
+        canvas.height = height;
+        drawWindow();
+        console.log('Dragging output window, new size:', { width, height });
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (isDraggingMain) {
+        isDraggingMain = false;
+        console.log('Stop dragging output window, final size:', { width, height });
+        drawWindow();
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (isDraggingMain) {
+        isDraggingMain = false;
+        console.log('Dragging output window stopped (mouseleave)');
+        drawWindow();
+      }
+    });
+
+    console.log('Output window script loaded');
+  </script>
+</body>
+</html>
