@@ -9,6 +9,7 @@ let filesLoaded = [];
 let newProjectWindow;
 let colorPickerWindow;
 let codeWindow;
+let blueprintWindow;
 let outputWindow;
 
 function logToFile(message) {
@@ -167,6 +168,39 @@ function createCodeWindow() {
   });
 }
 
+function createBlueprintWindow() {
+  if (blueprintWindow) {
+    blueprintWindow.focus();
+    return;
+  }
+
+  blueprintWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    parent: mainWindow,
+    modal: false,
+    frame: true,
+    titleBarStyle: 'default',
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  blueprintWindow.maximize();
+  blueprintWindow.loadFile('blueprint-window.html');
+  blueprintWindow.once('ready-to-show', () => {
+    blueprintWindow.show();
+    console.log('Blueprint window shown:', path.join(__dirname, 'blueprint-window.html'));
+    logToFile('Blueprint window shown: ' + path.join(__dirname, 'blueprint-window.html'));
+  });
+  blueprintWindow.on('closed', () => {
+    blueprintWindow = null;
+    console.log('Blueprint window closed');
+    logToFile('Blueprint window closed');
+  });
+}
+
 function createOutputWindow(windowData) {
   if (outputWindow) {
     outputWindow.focus();
@@ -218,6 +252,10 @@ ipcMain.on('open-code-window', () => {
   createCodeWindow();
 });
 
+ipcMain.on('open-blueprint-window', () => {
+  createBlueprintWindow();
+});
+
 ipcMain.on('run-code', (event) => {
   if (mainWindow) {
     mainWindow.webContents.send('get-window-data');
@@ -235,6 +273,14 @@ ipcMain.on('close-code-window', () => {
     codeWindow.close();
     console.log('Received close-code-window IPC, closing code window');
     logToFile('Received close-code-window IPC, closing code window');
+  }
+});
+
+ipcMain.on('close-blueprint-window', () => {
+  if (blueprintWindow) {
+    blueprintWindow.close();
+    console.log('Received close-blueprint-window IPC, closing blueprint window');
+    logToFile('Received close-blueprint-window IPC, closing blueprint window');
   }
 });
 

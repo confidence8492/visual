@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>藍圖視窗</title>
+  <style>
+    body {
+      margin: 20px;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 40px);
+    }
+    #blueprint-canvas {
+      flex: 3;
+      width: 100%;
+      background-color: #ffffff;
+      border: 1px solid #ccc;
+    }
+    #bottom-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #debug-area {
+      flex: 1;
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      overflow-y: auto;
+    }
+    #button-area {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    button {
+      padding: 8px 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #close-button {
+      background-color: #ff3b30;
+    }
+    #close-button:hover {
+      background-color: #cc2e26;
+    }
+    #context-menu {
+      position: absolute;
+      background-color: #fff;
+      border: 1px solid #ccc;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+      z-index: 1000;
+      padding: 5px 0;
+    }
+    #context-menu div {
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    #context-menu div:hover {
+      background-color: #e0e0e0;
+    }
+    #input-field {
+      position: absolute;
+      border: 1px solid #000;
+      font-size: 14px;
+      padding: 2px;
+      z-index: 1001;
+      pointer-events: auto;
+      box-sizing: border-box;
+    }
+    .traffic-lights .close {
+      background-color: #ff3b30;
+      border-radius: 50%;
+      width: 12px;
+      height: 12px;
+      margin: 4px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="blueprint-canvas"></canvas>
+  <div id="bottom-section">
+    <div id="debug-area">Debug output will appear here</div>
+    <div id="button-area">
+      <button id="run-button">執行</button>
+      <button id="close-button">關閉</button>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    const canvas = document.getElementById('blueprint-canvas');
+    const ctx = canvas.getContext('2d');
+    let isDraggingCanvas = false;
+    let isDraggingBox = false;
+    let isDraggingConnection = false;
+    let startX, startY;
+    let offsetX = 0, offsetY = 0;
+    let scale = 1;
+    let boxes = [];
+    let boxCounter = 0;
+    let selectedBoxIndex = -1;
+    let draggingBoxIndex = -1;
+    let activeInputBox = null;
+    let draggingConnection = null;
+    let connections = [];
+
+    function resizeCanvas() {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      drawBlueprint();
+    }
+
+    function drawBlueprint() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+      ctx.scale(scale, scale);
+
+      // 繪製連線
+      connections.forEach(conn => {
+        const startBox = boxes[conn.startBoxIndex];
+        const endBox = boxes[conn.endBoxIndex];
+        if (startBox && endBox) {
+          const sectionHeight = startBox.height / 6;
+          const lowerSectionHeight = startBox.height - sectionHeight;
+          const sectionWidth = startBox.width / 6;
+          const startX = conn.startCircle === 'right' ? startBox.x + 5 * sectionWidth + sectionWidth / 2 : startBox.x + sectionWidth / 2;
+          const startY = startBox.y + sectionHeight + lowerSectionHeight / 2;
+          const endX = conn.endCircle === 'right' ? endBox.x + 5 * sectionWidth + sectionWidth / 2 : endBox.x + sectionWidth / 2;
+          const endY = endBox.y + sectionHeight + lowerSectionHeight / 2;
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(endX, endY);
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          console.log('Connection drawn:', { startBox: conn.startBoxIndex, startCircle: conn.startCircle, endBox: conn.endBoxIndex, endCircle: conn.endCircle, startX, startY, endX, endY });
+        }
+      });
+
+      // 繪製方塊
+      boxes.forEach((box, index) => {
+        // 繪製方塊主體
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(box.x, box.y, box.width, box.height);
+        ctx.strokeStyle = box.selected ? '#ff0000' : '#000000';
+        ctx.lineWidth = box.selected ? 3 : 2;
+        ctx.beginPath();
+        ctx.roundRect(box.x, box.y, box.width, box.height, 10);
+        ctx.stroke();
+
+        // 第一等份：顯示文字
+        const sectionHeight = box.height / 6; // 200 / 6 ≈ 33.33
+        ctx.save();
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#000000';
+        ctx.textBaseline = 'middle';
+        const text = box.type === 'Beginplay' ? 'Beginplay' : 'print';
+        const textWidth = ctx.measureText(text).width;
+        const textX = box.x + (box.width - textWidth) / 2;
+        const textY = box.y + sectionHeight / 2;
+        ctx.fillText(text, textX, textY);
+        ctx.restore();
+
+        // 下面五等份合併，繪製圓形
+        const lowerSectionHeight = box.height - sectionHeight; // 166.67
+        const sectionWidth = box.width / 6; // 300 / 6 = 50
+        // 左圓形
+        ctx.save();
+        ctx.beginPath();
+        const circleLeftX = box.type === 'Beginplay' ? box.x + 5 * sectionWidth + sectionWidth / 2 : box.x + sectionWidth / 2;
+        const circleY = box.y + sectionHeight + lowerSectionHeight / 2;
+        ctx.arc(circleLeftX, circleY, 10, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = box.circleLeftHovered || box.circleLeftConnected ? (box.selected ? 3 : 2) : 1;
+        ctx.stroke();
+        ctx.restore();
+
+        // 右圓形（僅 "print" 方塊）
+        if (box.type === 'print') {
+          ctx.save();
+          ctx.beginPath();
+          const circleRightX = box.x + 5 * sectionWidth + sectionWidth / 2;
+          ctx.arc(circleRightX, circleY, 10, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = box.circleRightHovered || box.circleRightConnected ? (box.selected ? 3 : 2) : 1;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // "print" 方塊的輸入框
+        if (box.type === 'print') {
+          ctx.save();
+          const inputX = box.x + sectionWidth + 15; // 左圓形右邊 + 5px
+          const inputY = box.y + sectionHeight + lowerSectionHeight / 2 - 10; // 垂直居中
+          const inputWidth = box.width - 2 * sectionWidth - 20; // 右圓形左邊 - 5px
+          const inputHeight = 20; // 與圓形同高
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.rect(inputX, inputY, inputWidth, inputHeight);
+          ctx.stroke();
+          if (box.inputText) {
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#000000';
+            ctx.textBaseline = 'middle';
+            const inputTextWidth = ctx.measureText(box.inputText).width;
+            const inputTextX = inputX + (inputWidth - inputTextWidth) / 2;
+            ctx.fillText(box.inputText, inputTextX, inputY + inputHeight / 2);
+          }
+          ctx.restore();
+        }
+
+        console.log(`Box ${index} drawn:`, { id: box.id, type: box.type, x: box.x, y: box.y, width: box.width, height: box.height, selected: box.selected, circleLeftHovered: box.circleLeftHovered, circleRightHovered: box.circleRightHovered, circleLeftConnected: box.circleLeftConnected, circleRightConnected: box.circleRightConnected, inputText: box.inputText });
+      });
+
+      // 繪製拖曳中的連線
+      if (isDraggingConnection && draggingConnection) {
+        const startBox = boxes[draggingConnection.startBoxIndex];
+        const sectionHeight = startBox.height / 6;
+        const lowerSectionHeight = startBox.height - sectionHeight;
+        const sectionWidth = startBox.width / 6;
+        const startX = draggingConnection.startCircle === 'right' ? startBox.x + 5 * sectionWidth + sectionWidth / 2 : startBox.x + sectionWidth / 2;
+        const startY = startBox.y + sectionHeight + lowerSectionHeight / 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(draggingConnection.endX, draggingConnection.endY);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        console.log('Temporary connection drawn:', { startBox: draggingConnection.startBoxIndex, startCircle: draggingConnection.startCircle, endX: draggingConnection.endX, endY: draggingConnection.endY });
+      }
+
+      ctx.restore();
+      console.log('Blueprint drawn, offset:', { offsetX, offsetY }, 'scale:', scale, 'connections:', connections);
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - offsetX) / scale;
+        const y = (e.clientY - rect.top - offsetY) / scale;
+        console.log('Mouse down on blueprint canvas at:', { x, y });
+        // 移除現有輸入框
+        if (activeInputBox) {
+          const box = boxes[selectedBoxIndex];
+          box.inputText = activeInputBox.value;
+          console.log('Input text updated on click outside:', { index: selectedBoxIndex, id: box.id, inputText: box.inputText });
+          activeInputBox.remove();
+          activeInputBox = null;
+          drawBlueprint();
+        }
+        // 檢查是否點擊圓形
+        for (let i = boxes.length - 1; i >= 0; i--) {
+          const box = boxes[i];
+          const sectionHeight = box.height / 6;
+          const lowerSectionHeight = box.height - sectionHeight;
+          const sectionWidth = box.width / 6;
+          const circleLeftX = box.type === 'Beginplay' ? box.x + 5 * sectionWidth + sectionWidth / 2 : box.x + sectionWidth / 2;
+          const circleRightX = box.type === 'print' ? box.x + 5 * sectionWidth + sectionWidth / 2 : null;
+          const circleY = box.y + sectionHeight + lowerSectionHeight / 2;
+          const dxLeft = x - circleLeftX;
+          const dyLeft = y - circleY;
+          if (dxLeft * dxLeft + dyLeft * dyLeft <= 10 * 10) {
+            isDraggingConnection = true;
+            draggingConnection = { startBoxIndex: i, startCircle: box.type === 'Beginplay' ? 'right' : 'left', startX: circleLeftX, startY: circleY, endX: x, endY: y };
+            selectedBoxIndex = i;
+            boxes.forEach((b, idx) => b.selected = idx === i);
+            console.log('Start dragging connection from:', { index: i, id: box.id, circle: 'left', circleX: circleLeftX, circleY });
+            drawBlueprint();
+            return;
+          }
+          if (box.type === 'print' && circleRightX) {
+            const dxRight = x - circleRightX;
+            const dyRight = y - circleY;
+            if (dxRight * dxRight + dyRight * dyRight <= 10 * 10) {
+              isDraggingConnection = true;
+              draggingConnection = { startBoxIndex: i, startCircle: 'right', startX: circleRightX, startY: circleY, endX: x, endY: y };
+              selectedBoxIndex = i;
+              boxes.forEach((b, idx) => b.selected = idx === i);
+              console.log('Start dragging connection from:', { index: i, id: box.id, circle: 'right', circleX: circleRightX, circleY });
+              drawBlueprint();
+              return;
+            }
+          }
+        }
+        // 檢查是否點擊 "print" 方塊的輸入框
+        for (let i = boxes.length - 1; i >= 0; i--) {
+          const box = boxes[i];
+          if (box.type === 'print') {
+            const sectionHeight = box.height / 6;
+            const lowerSectionHeight = box.height - sectionHeight;
+            const sectionWidth = box.width / 6;
+            const inputX = box.x + sectionWidth + 15;
+            const inputY = box.y + sectionHeight + lowerSectionHeight / 2 - 10;
+            const inputWidth = box.width - 2 * sectionWidth - 20;
+            const inputHeight = 20;
+            if (x >= inputX && x <= inputX + inputWidth && y >= inputY && y <= inputY + inputHeight) {
+              selectedBoxIndex = i;
+              boxes.forEach((b, idx) => b.selected = idx === i);
+              showInputField(box, i, inputX, inputY, inputWidth, inputHeight);
+              console.log('Input field clicked:', { index: i, id: box.id, type: box.type });
+              drawBlueprint();
+              return;
+            }
+          }
+        }
+        // 檢查是否點擊方塊
+        selectedBoxIndex = -1;
+        isDraggingBox = false;
+        for (let i = boxes.length - 1; i >= 0; i--) {
+          const box = boxes[i];
+          if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
+            selectedBoxIndex = i;
+            isDraggingBox = true;
+            draggingBoxIndex = i;
+            boxes.forEach((b, idx) => b.selected = idx === i);
+            startX = x;
+            startY = y;
+            console.log('Selected and start dragging box:', { index: i, id: box.id, type: box.type, x: box.x, y: box.y });
+            drawBlueprint();
+            return;
+          }
+        }
+        // 若未點擊方塊或圓形，開始拖動畫布
+        isDraggingCanvas = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        console.log('Start dragging canvas at:', { x: startX, y: startY });
+      }
+    });
+
+    function showInputField(box, index, inputX, inputY, inputWidth, inputHeight) {
+      if (activeInputBox) {
+        activeInputBox.remove();
+      }
+      activeInputBox = document.createElement('input');
+      activeInputBox.id = 'input-field';
+      activeInputBox.type = 'text';
+      activeInputBox.value = box.inputText || '';
+      activeInputBox.style.left = `${inputX * scale + offsetX + canvas.getBoundingClientRect().left}px`;
+      activeInputBox.style.top = `${inputY * scale + offsetY + canvas.getBoundingClientRect().top}px`;
+      activeInputBox.style.width = `${inputWidth * scale}px`;
+      activeInputBox.style.height = `${inputHeight * scale}px`;
+      activeInputBox.style.zIndex = '1001';
+      document.body.appendChild(activeInputBox);
+      setTimeout(() => activeInputBox.focus(), 0);
+      console.log('Input field created:', { index, id: box.id, x: inputX, y: inputY, width: inputWidth, height: inputHeight });
+      activeInputBox.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          box.inputText = e.target.value;
+          console.log('Input text updated:', { index, id: box.id, inputText: box.inputText });
+          activeInputBox.remove();
+          activeInputBox = null;
+          drawBlueprint();
+        }
+      });
+      activeInputBox.addEventListener('blur', () => {
+        box.inputText = activeInputBox.value;
+        console.log('Input text updated on blur:', { index, id: box.id, inputText: box.inputText });
+        activeInputBox.remove();
+        activeInputBox = null;
+        drawBlueprint();
+      });
+      activeInputBox.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - offsetX) / scale;
+      const y = (e.clientY - rect.top - offsetY) / scale;
+      // 更新圓形懸停狀態
+      boxes.forEach((box, index) => {
+        const sectionHeight = box.height / 6;
+        const lowerSectionHeight = box.height - sectionHeight;
+        const sectionWidth = box.width / 6;
+        const circleLeftX = box.type === 'Beginplay' ? box.x + 5 * sectionWidth + sectionWidth / 2 : box.x + sectionWidth / 2;
+        const circleRightX = box.type === 'print' ? box.x + 5 * sectionWidth + sectionWidth / 2 : null;
+        const circleY = box.y + sectionHeight + lowerSectionHeight / 2;
+        const dxLeft = x - circleLeftX;
+        const dyLeft = y - circleY;
+        box.circleLeftHovered = dxLeft * dxLeft + dyLeft * dyLeft <= 10 * 10;
+        box.circleRightHovered = false;
+        if (box.type === 'print' && circleRightX) {
+          const dxRight = x - circleRightX;
+          const dyRight = y - circleY;
+          box.circleRightHovered = dxRight * dxRight + dyRight * dyRight <= 10 * 10;
+        }
+        if (box.circleLeftHovered || box.circleRightHovered) {
+          console.log('Circle hovered:', { index, id: box.id, type: box.type, circle: box.circleLeftHovered ? 'left' : 'right' });
+        }
+      });
+      if (isDraggingConnection) {
+        draggingConnection.endX = x;
+        draggingConnection.endY = y;
+        // 檢查是否懸停在另一個圓形上
+        boxes.forEach((box, index) => {
+          if (index !== draggingConnection.startBoxIndex) {
+            const sectionHeight = box.height / 6;
+            const lowerSectionHeight = box.height - sectionHeight;
+            const sectionWidth = box.width / 6;
+            const circleLeftX = box.type === 'Beginplay' ? box.x + 5 * sectionWidth + sectionWidth / 2 : box.x + sectionWidth / 2;
+            const circleRightX = box.type === 'print' ? box.x + 5 * sectionWidth + sectionWidth / 2 : null;
+            const circleY = box.y + sectionHeight + lowerSectionHeight / 2;
+            const dxLeft = x - circleLeftX;
+            const dyLeft = y - circleY;
+            box.circleLeftConnected = dxLeft * dxLeft + dyLeft * dyLeft <= 10 * 10;
+            box.circleRightConnected = false;
+            if (box.type === 'print' && circleRightX) {
+              const dxRight = x - circleRightX;
+              const dyRight = y - circleY;
+              box.circleRightConnected = dxRight * dxRight + dyRight * dyRight <= 10 * 10;
+            }
+            if (box.circleLeftConnected || box.circleRightConnected) {
+              console.log('Connection end hovered on circle:', { index, id: box.id, type: box.type, circle: box.circleLeftConnected ? 'left' : 'right' });
+            }
+          }
+        });
+        drawBlueprint();
+      } else if (isDraggingBox) {
+        const dx = x - startX;
+        const dy = y - startY;
+        const box = boxes[draggingBoxIndex];
+        box.x += dx;
+        box.y += dy;
+        startX = x;
+        startY = y;
+        drawBlueprint();
+        console.log('Dragging box:', { index: draggingBoxIndex, id: box.id, type: box.type, x: box.x, y: box.y });
+      } else if (isDraggingCanvas) {
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        offsetX += dx;
+        offsetY += dy;
+        startX = e.clientX;
+        startY = e.clientY;
+        drawBlueprint();
+        if (activeInputBox) {
+          const box = boxes[selectedBoxIndex];
+          const sectionHeight = box.height / 6;
+          const lowerSectionHeight = box.height - sectionHeight;
+          const sectionWidth = box.width / 6;
+          const inputX = box.x + sectionWidth + 15;
+          const inputY = box.y + sectionHeight + lowerSectionHeight / 2 - 10;
+          const inputWidth = box.width - 2 * sectionWidth - 20;
+          const inputHeight = 20;
+          activeInputBox.style.left = `${inputX * scale + offsetX + canvas.getBoundingClientRect().left}px`;
+          activeInputBox.style.top = `${inputY * scale + offsetY + canvas.getBoundingClientRect().top}px`;
+        }
+        console.log('Dragging canvas, offset:', { offsetX, offsetY });
+      } else {
+        drawBlueprint();
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (isDraggingConnection) {
+        isDraggingConnection = false;
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - offsetX) / scale;
+        const y = (e.clientY - rect.top - offsetY) / scale;
+        let connected = false;
+        for (let i = 0; i < boxes.length; i++) {
+          if (i !== draggingConnection.startBoxIndex) {
+            const box = boxes[i];
+            const sectionHeight = box.height / 6;
+            const lowerSectionHeight = box.height - sectionHeight;
+            const sectionWidth = box.width / 6;
+            const circleLeftX = box.type === 'Beginplay' ? box.x + 5 * sectionWidth + sectionWidth / 2 : box.x + sectionWidth / 2;
+            const circleRightX = box.type === 'print' ? box.x + 5 * sectionWidth + sectionWidth / 2 : null;
+            const circleY = box.y + sectionHeight + lowerSectionHeight / 2;
+            const dxLeft = x - circleLeftX;
+            const dyLeft = y - circleY;
+            if (dxLeft * dxLeft + dyLeft * dyLeft <= 10 * 10) {
+              connections.push({ startBoxIndex: draggingConnection.startBoxIndex, startCircle: draggingConnection.startCircle, endBoxIndex: i, endCircle: 'left' });
+              connected = true;
+              console.log('Connection established:', { startBox: draggingConnection.startBoxIndex, startCircle: draggingConnection.startCircle, endBox: i, endCircle: 'left' });
+              break;
+            }
+            if (box.type === 'print' && circleRightX) {
+              const dxRight = x - circleRightX;
+              const dyRight = y - circleY;
+              if (dxRight * dxRight + dyRight * dyRight <= 10 * 10) {
+                connections.push({ startBoxIndex: draggingConnection.startBoxIndex, startCircle: draggingConnection.startCircle, endBoxIndex: i, endCircle: 'right' });
+                connected = true;
+                console.log('Connection established:', { startBox: draggingConnection.startBoxIndex, startCircle: draggingConnection.startCircle, endBox: i, endCircle: 'right' });
+                break;
+              }
+            }
+          }
+        }
+        boxes.forEach(box => { box.circleLeftConnected = false; box.circleRightConnected = false; });
+        draggingConnection = null;
+        drawBlueprint();
+        if (!connected) {
+          console.log('Connection cancelled, no target circle');
+        }
+      }
+      if (isDraggingBox) {
+        isDraggingBox = false;
+        console.log('Stop dragging box:', { index: draggingBoxIndex, id: boxes[draggingBoxIndex].id, type: boxes[draggingBoxIndex].type });
+      }
+      if (isDraggingCanvas) {
+        isDraggingCanvas = false;
+        console.log('Stop dragging canvas');
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (isDraggingConnection) {
+        isDraggingConnection = false;
+        draggingConnection = null;
+        boxes.forEach(box => { box.circleLeftConnected = false; box.circleRightConnected = false; });
+        console.log('Connection cancelled (mouseleave)');
+      }
+      if (isDraggingBox) {
+        isDraggingBox = false;
+        console.log('Dragging box stopped (mouseleave):', { index: draggingBoxIndex, id: boxes[draggingBoxIndex].id, type: boxes[draggingBoxIndex].type });
+      }
+      if (isDraggingCanvas) {
+        isDraggingCanvas = false;
+        console.log('Dragging canvas stopped (mouseleave)');
+      }
+      boxes.forEach(box => { box.circleLeftHovered = false; box.circleRightHovered = false; });
+      drawBlueprint();
+    });
+
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX;
+      const y = e.clientY;
+      const canvasX = (e.clientX - rect.left - offsetX) / scale;
+      const canvasY = (e.clientY - rect.top - offsetY) / scale;
+      console.log('Right-click on blueprint canvas at:', { x, y, canvasX, canvasY });
+      // 移除現有右鍵選單
+      const existingMenu = document.getElementById('context-menu');
+      if (existingMenu) existingMenu.remove();
+      // 顯示右鍵選單
+      const menu = document.createElement('div');
+      menu.id = 'context-menu';
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+      menu.innerHTML = `
+        <div onclick="document.getElementById('context-menu').remove(); addBeginplayBox(${canvasX}, ${canvasY}); console.log('Context menu item clicked: Beginplay')">Beginplay</div>
+        <div onclick="document.getElementById('context-menu').remove(); addPrintBox(${canvasX}, ${canvasY}); console.log('Context menu item clicked: print')">print</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: if')">if</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: while')">while</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: gate')">gate</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: switch')">switch</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: try')">try</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: +')">+</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: -')">-</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: *')">*</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: /')">/</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: %')">%</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: &')">&</div>
+        <div onclick="document.getElementById('context-menu').remove(); console.log('Context menu item clicked: ^')">^</div>
+      `;
+      document.body.appendChild(menu);
+      console.log('Blueprint context menu shown at:', { x, y });
+    });
+
+    function addBeginplayBox(x, y) {
+      boxCounter++;
+      boxes.push({
+        id: `box${boxCounter}`,
+        type: 'Beginplay',
+        x: x,
+        y: y,
+        width: 300,
+        height: 200,
+        selected: false,
+        circleLeftHovered: false,
+        circleLeftConnected: false
+      });
+      console.log('Beginplay box added:', { id: `box${boxCounter}`, type: 'Beginplay', x, y, width: 300, height: 200 });
+      drawBlueprint();
+    }
+
+    function addPrintBox(x, y) {
+      boxCounter++;
+      boxes.push({
+        id: `box${boxCounter}`,
+        type: 'print',
+        x: x,
+        y: y,
+        width: 300,
+        height: 200,
+        selected: false,
+        circleLeftHovered: false,
+        circleRightHovered: false,
+        circleLeftConnected: false,
+        circleRightConnected: false,
+        inputText: ''
+      });
+      console.log('Print box added:', { id: `box${boxCounter}`, type: 'print', x, y, width: 300, height: 200, inputText: '' });
+      drawBlueprint();
+    }
+
+    // 點擊其他地方移除右鍵選單
+    document.addEventListener('click', (e) => {
+      const existingMenu = document.getElementById('context-menu');
+      if (existingMenu && !existingMenu.contains(e.target)) {
+        existingMenu.remove();
+        console.log('Blueprint context menu removed');
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.shiftKey && e.key === '=') { // Shift + +
+        scale = Math.max(0.5, scale + 0.5);
+        drawBlueprint();
+        if (activeInputBox) {
+          const box = boxes[selectedBoxIndex];
+          const sectionHeight = box.height / 6;
+          const lowerSectionHeight = box.height - sectionHeight;
+          const sectionWidth = box.width / 6;
+          const inputX = box.x + sectionWidth + 15;
+          const inputY = box.y + sectionHeight + lowerSectionHeight / 2 - 10;
+          const inputWidth = box.width - 2 * sectionWidth - 20;
+          const inputHeight = 20;
+          activeInputBox.style.left = `${inputX * scale + offsetX + canvas.getBoundingClientRect().left}px`;
+          activeInputBox.style.top = `${inputY * scale + offsetY + canvas.getBoundingClientRect().top}px`;
+          activeInputBox.style.width = `${inputWidth * scale}px`;
+          activeInputBox.style.height = `${inputHeight * scale}px`;
+        }
+        console.log('Zoom in, scale:', scale);
+      } else if (e.shiftKey && e.key === '-') { // Shift + -
+        scale = Math.max(0.5, scale - 0.5);
+        drawBlueprint();
+        if (activeInputBox) {
+          const box = boxes[selectedBoxIndex];
+          const sectionHeight = box.height / 6;
+          const lowerSectionHeight = box.height - sectionHeight;
+          const sectionWidth = box.width / 6;
+          const inputX = box.x + sectionWidth + 15;
+          const inputY = box.y + sectionHeight + lowerSectionHeight / 2 - 10;
+          const inputWidth = box.width - 2 * sectionWidth - 20;
+          const inputHeight = 20;
+          activeInputBox.style.left = `${inputX * scale + offsetX + canvas.getBoundingClientRect().left}px`;
+          activeInputBox.style.top = `${inputY * scale + offsetY + canvas.getBoundingClientRect().top}px`;
+          activeInputBox.style.width = `${inputWidth * scale}px`;
+          activeInputBox.style.height = `${inputHeight * scale}px`;
+        }
+        console.log('Zoom out, scale:', scale);
+      } else if (e.metaKey && e.altKey && e.key === 'Backspace' && selectedBoxIndex !== -1) {
+        connections = connections.filter(conn => conn.startBoxIndex !== selectedBoxIndex && conn.endBoxIndex !== selectedBoxIndex);
+        boxes.splice(selectedBoxIndex, 1);
+        selectedBoxIndex = -1;
+        if (activeInputBox) {
+          activeInputBox.remove();
+          activeInputBox = null;
+        }
+        console.log('Deleted selected box, boxes:', boxes, 'connections:', connections);
+        drawBlueprint();
+      }
+    });
+
+    document.getElementById('run-button').addEventListener('click', () => {
+      ipcRenderer.send('run-code');
+      console.log('Run button clicked, sent run-code IPC');
+    });
+
+    document.getElementById('close-button').addEventListener('click', () => {
+      ipcRenderer.send('close-blueprint-window');
+      console.log('Close button clicked, sent close-blueprint-window IPC');
+    });
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    console.log('Blueprint window loaded');
+  </script>
+</body>
+</html>

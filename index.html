@@ -472,7 +472,10 @@
           menu.id = 'context-menu';
           menu.style.left = `${e.clientX}px`;
           menu.style.top = `${e.clientY}px`;
-          menu.innerHTML = `<div onclick="document.getElementById('context-menu').remove(); ipcRenderer.send('open-code-window'); console.log('Context menu item clicked: 程式碼')">程式碼</div>`;
+          menu.innerHTML = `
+            <div onclick="document.getElementById('context-menu').remove(); ipcRenderer.send('open-code-window'); console.log('Context menu item clicked: 程式碼')">程式碼</div>
+            <div onclick="document.getElementById('context-menu').remove(); ipcRenderer.send('open-blueprint-window'); console.log('Context menu item clicked: 藍圖')">藍圖</div>
+          `;
           document.body.appendChild(menu);
           console.log('Context menu shown at:', { x: e.clientX, y: e.clientY });
         } else {

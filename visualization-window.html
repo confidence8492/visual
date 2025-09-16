@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Visualization Window</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #f0f0f0;
+    }
+    #visualization-canvas {
+      border: none;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="visualization-canvas"></canvas>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    let canvas, ctx;
+    let textBoxes = [];
+    let mainWindowSize = { width: 0, height: 0 };
+
+    ipcRenderer.on('set-visualization-data', (event, data) => {
+      textBoxes = data.textBoxes;
+      mainWindowSize = data.mainWindow;
+      console.log('Visualization data received:', { textBoxes, mainWindowSize });
+
+      canvas = document.getElementById('visualization-canvas');
+      canvas.width = mainWindowSize.width;
+      canvas.height = mainWindowSize.height;
+      ctx = canvas.getContext('2d');
+
+      drawVisualization();
+    });
+
+    function drawVisualization() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 僅繪製文字框
+      textBoxes.forEach((box, index) => {
+        ctx.fillStyle = box.backgroundColor || '#ffffff';
+        ctx.fillRect(box.x - 50, box.y - 50, box.width, box.height);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.rect(box.x - 50, box.y - 50, box.width, box.height);
+        ctx.stroke();
+        if (box.text) {
+          ctx.font = `${box.fontSize || 14}px Arial`;
+          ctx.fillStyle = box.fontColor || '#000';
+          ctx.textBaseline = 'top';
+          const textWidth = ctx.measureText(box.text).width;
+          let textX;
+          if (box.align === 'center') {
+            textX = (box.x - 50) + (box.width - textWidth) / 2;
+          } else if (box.align === 'right') {
+            textX = (box.x - 50) + box.width - textWidth - 5;
+          } else {
+            textX = (box.x - 50) + 5; // left (default)
+          }
+          ctx.fillText(box.text, textX, box.y - 50 + 5);
+        }
+        console.log(`Text box ${index} drawn in visualization:`, { id: box.id, x: box.x - 50, y: box.y - 50, width: box.width, height: box.height, text: box.text, align: box.align, fontSize: box.fontSize, fontColor: box.fontColor, backgroundColor: box.backgroundColor });
+      });
+      console.log('Visualization drawn, main size:', mainWindowSize);
+    }
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      drawVisualization();
+      console.log('Visualization canvas resized:', { width: canvas.width, height: canvas.height });
+    });
+  </script>
+</body>
+</html>
